@@ -3,12 +3,21 @@
 (def WIDTH (atom nil))
 (def HEIGHT (atom nil))
 
-(def COLS 10)
+(def COLS 20)
 (def ROWS 20)
 
 (def OFFSET (atom [0 0]))
 (def ROTATION (atom nil))
-(def COLORS ["red" "blue" "green" "yellow" "orange" "pink"])
+(def CLICK (atom nil))
+(def COLORS ["black" "red" "blue" "green" "yellow" "orange" "pink"])
+(def COLORS-N  (zipmap COLORS (rest COLORS)))
+(defn color-next [color] (get COLORS-N color (first COLORS)))
+(defn color--next [color]
+  (let [colors* (cycle COLORS)]
+    (->> color
+         (.indexOf colors*)
+         (inc)
+         (nth colors*))))
 (def SHAPES [[[0 1] [0 2] [0 3] [0 4]]
              [[0 0] [0 1] [1 1] [1 2]]
              [[1 2] [1 1] [0 1] [0 0]]
@@ -20,7 +29,7 @@
 (defn get-block []
   (let [shape (rand-nth SHAPES)
         offset (inc (rand-int (- COLS 3)))]
-    {:color (rand-nth COLORS)
+    {:color (rand-nth (rest COLORS))
      :shape (map (fn [[x y]] [(+ x offset) y]) shape)}))
 
 (defn get-board []
@@ -31,6 +40,12 @@
         y (int (/ (- pos x) COLS))]
     [x, y]))
 
+(defn xy->canvas [x y]
+  [(* x (/ @WIDTH COLS)) (* y (/ @WIDTH COLS))])
+
+(defn canvas->xy
+  ([x y] [(int (/ x (/ @WIDTH COLS))) (int (/ y (/ @WIDTH COLS)))])
+  ([xy] (canvas->xy (first xy) (second xy))))
 
 (defn collides?
   ([board x y pos]
@@ -98,8 +113,18 @@
   (vec (map #(let [[x y] (pos-to-xy %)]
                (if (some (fn [[px py]] (and (= x px) (= y py)))
                      shape)
-                 color (get board %)))
+                 color
+                 (get board %)))
            (range (count board)))))
+
+(defn update-board-on-click [board {:keys [color shape]}]
+  (if @CLICK
+    (vec (map #(let [[x y] (pos-to-xy %)]
+                 (if (and (= [x y] (canvas->xy @CLICK)))
+                   (color--next (get board %))
+                   (get board %)))
+              (range (count board))))
+    board))
 
 (defn game-over? [board]
   (not (reduce #(and %1 (= "black" %2))
