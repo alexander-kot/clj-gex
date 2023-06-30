@@ -9,10 +9,22 @@
 ;;;;;;Controls;;;;
 (defn handle-input [#^KeyEvent event]
   (condp = (.getKeyCode event)
-    KeyEvent/VK_LEFT (swap! OFFSET #(map + [-1 0] %))
-    KeyEvent/VK_RIGHT (swap! OFFSET #(map + [1 0] %))
-    KeyEvent/VK_UP (reset! ROTATION :left)
-    KeyEvent/VK_DOWN (reset! ROTATION :right)))
+    KeyEvent/VK_W(swap! OFFSET #(update % :y inc))
+    KeyEvent/VK_E(swap! OFFSET #(-> %
+                                    (update :y inc)
+                                    (update :x dec)))
+    KeyEvent/VK_D(swap! OFFSET #(update % :x dec))
+    KeyEvent/VK_X(swap! OFFSET #(update % :y dec))
+    KeyEvent/VK_Z(swap! OFFSET #(-> %
+                                    (update :y dec)
+                                    (update :x inc)))
+    KeyEvent/VK_A(swap! OFFSET #(update % :x inc))
+
+    KeyEvent/VK_LEFT (swap! OFFSET #(update % :x inc))
+    KeyEvent/VK_RIGHT (swap! OFFSET #(update % :x dec))
+    KeyEvent/VK_UP (swap! OFFSET #(update % :y inc))
+    KeyEvent/VK_DOWN (swap! OFFSET #(update % :y dec))
+    ))
 
 (defn input-listener []
   (proxy [ActionListener KeyListener] []
@@ -53,40 +65,50 @@
       (. buffer show))
     (.. Toolkit (getDefaultToolkit) (sync))))
 
-(defn gex-x [] (map #(* % 0.66) (list -1 -0.5 0.5 1 0.5 -0.5)))
-(defn gex-y [] (map #(* % 0.6) (list 0 0.866 0.866 0 -0.866 -0.866)))
+(defn gex-x [] (map #(* % 0.6) (list 0 0.866 0.866 0 -0.866 -0.866)))
+(defn gex-y [] (map #(* % 0.66) (list -1 -0.5 0.5 1 0.5 -0.5)))
+
+(defn x-to-pos [pointx x y]
+  (let [width (/ @WIDTH COLS)]
+    (-> pointx
+         (+ (+ x (* 0.5 y)))
+         (* width)
+         (+ (/ @HEIGHT 2)))))
+
+(defn y-to-pos [pointy x y]
+  (let [width (/ @WIDTH COLS)]
+    (-> pointy
+         (+ y)
+         (* width)
+         (+ (/ @WIDTH 2)))))
+
 
 (defn draw-gex [x y color #^Graphics g]
-  (let [width (/ @WIDTH COLS)
-        height (/ @HEIGHT ROWS)
-        xpos (->> (gex-x)
-                  (map #(+ % x))
-                  (map #(* % width))
+  (let [xpos (->> (gex-x)
+                  (map #(x-to-pos % x y))
                   (int-array))
         ypos (->> (gex-y)
-                  (map #(+ % (+ y (* 0.5 (rem x 2)))))
-                  (map #(* % width))
+                  (map #(y-to-pos % x y))
                   (int-array))]
     (doto g
       (.setColor (get colors color))
       (.fillPolygon xpos ypos 6)
       (.setColor Color/gray)
-      (.drawPolygon xpos ypos 6))))
+      (.drawPolygon xpos ypos 6))
+    [(/ (apply + xpos) 6) (/ (apply + ypos) 6)]))
 
 (defn draw-text [#^Graphics g color #^String text x y]
   (doto g
     (.setColor color)
     (.drawString text  (int x) (int y))))
 
-(defn draw-game-over [score]
-  (fn [#^Graphics g]
-    (doto g
-      (.setColor (new Color (float 0) (float 0) (float 0) (float 0.7)))
-      (.fillRect 0 0 @WIDTH @HEIGHT))
-    (draw-text g Color/red "GAME OVER" (- (/ @WIDTH 2) 50) (/ @HEIGHT 2))
-    (draw-text g Color/red (str "Final Score: " score) (- (/ @WIDTH 2) 55) (+ 15 (/ @HEIGHT 2)))))
+(defn inView? [x y]
+  (and (> x (- (@view :x-position) (@view :half-width)))
+       (< x (+ (@view :x-position) (@view :half-width)))
+       (> y (- (@view :y-position) (@view :half-height)))
+       (< y (+ (@view :y-position) (@view :half-height)))))
 
-(defn draw-board [board block score]
+(defn draw-view [board]
   (fn [#^Graphics g]
     (doto g
       (.setColor Color/BLACK)
@@ -94,12 +116,14 @@
 
     (doseq [square (range (count board))]
       (let [[x y] (pos-to-xy square)]
-        (draw-gex x y (get board square) g)))
+        (if (inView? x y)
+          (let
+            [x-view (- x (@view :x-position))
+             y-view (- y (@view :y-position))
+             [xpos ypos] (draw-gex x-view y-view (get board square) g)]
+            (draw-text g Color/green (format "%s:%s" x y) (- xpos 7) ypos)))))
 
-    (doseq [[x y] (:shape block)]
-      (draw-gex x y (:color block) g))
-
-    (draw-text g Color/green (str "score: " score) 20 25)))
+    (draw-text g Color/green (format "x: %s y: %s" (@view :x-position) (@view :y-position)) 20 25)))
 
 (defn -main [& args]
   (reset! WIDTH 600)
@@ -121,40 +145,27 @@
       (.requestFocus))
 
     ;;game loop
-    (loop [score 0
-           board (get-board)
+    (loop [board (get-board)
            block (get-block)
            old-time (System/currentTimeMillis)]
 
-      (reset! OFFSET [0 0])
+      (reset! OFFSET {:x 0 :y 0})
       (reset! ROTATION nil)
       (reset! CLICK nil)
       (Thread/sleep 10)
-      (draw canvas (draw-board board block score))
+      (draw canvas (draw-view board))
 
       (let [cur-time (System/currentTimeMillis)
             new-time (long (if (> (- cur-time old-time) 250)
                              cur-time
                              old-time))
             drop? (> new-time old-time)
-            [num-removed new-board] (clear-lines (update-board-on-click board block))]
-            ;[num-removed new-board] (clear-lines board)]
-        (cond
-          (game-over? board)
-          (draw canvas (draw-game-over score))
+            new-board (update-board-on-click board)]
+        ;[num-removed new-board] (clear-lines board)]
 
-          (collides? board (:shape block))
-          (recur
-            score
-            (update-board board block)
-            (get-block)
-            new-time)
-
-          :default
-          (recur
-            (+ score (* num-removed num-removed))
-            new-board
-            (transform board block drop?)
-            new-time))))))
+        (recur
+          new-board
+          (transform board block false)
+          new-time)))))
 
 ;(-main)

@@ -6,7 +6,13 @@
 (def COLS 20)
 (def ROWS 20)
 
-(def OFFSET (atom [0 0]))
+(def view (atom {:x-position (int (/ COLS 2))
+                 :y-position (int (/ COLS 2))
+                 :half-width 5
+                 :half-height 5
+                 :angle 0}))
+
+(def OFFSET (atom {:x 0 :y 0}))
 (def ROTATION (atom nil))
 (def CLICK (atom nil))
 (def COLORS ["black" "red" "blue" "green" "yellow" "orange" "pink"])
@@ -33,7 +39,7 @@
      :shape (map (fn [[x y]] [(+ x offset) y]) shape)}))
 
 (defn get-board []
-  (vec (take (* ROWS COLS) (repeat "black"))))
+  (vec (take (* ROWS COLS) (repeatedly #(nth COLORS (rand-int (.length COLORS)))))))
 
 (defn pos-to-xy [pos]
   (let [x (mod pos COLS)
@@ -85,12 +91,11 @@
     shape))
 
 (defn shift [board shape]
-  (let [shifted (map
-                  (fn [[x y]]
-                    [(+ x (first @OFFSET)) y])
-                  shape)]
-    (if (collides? board shifted)
-      shape shifted)))
+  (swap! view (fn [view*]
+                (-> view*
+                    (update :x-position #(+ % (:x @OFFSET)))
+                    (update :y-position #(+ % (:y @OFFSET))))))
+  shape)
 
 (defn transform [board {:keys [color shape]} drop?]
   (let [rotated (->> shape (shift board) (rotate board))]
@@ -99,25 +104,7 @@
               (map (fn [[x y]] [x (inc y)]) rotated)
               rotated)}))
 
-(defn clear-lines [board]
-  (let [new-board (->> board
-                    (partition COLS)
-                    (filter #(some #{"black"} %))
-                    (apply concat))
-        num-removed (- (count board) (count new-board))]
-    [num-removed
-     (into (vec (take num-removed (repeat "black")))
-       new-board)]))
-
-(defn update-board [board {:keys [color shape]}]
-  (vec (map #(let [[x y] (pos-to-xy %)]
-               (if (some (fn [[px py]] (and (= x px) (= y py)))
-                     shape)
-                 color
-                 (get board %)))
-           (range (count board)))))
-
-(defn update-board-on-click [board {:keys [color shape]}]
+(defn update-board-on-click [board]
   (if @CLICK
     (vec (map #(let [[x y] (pos-to-xy %)]
                  (if (and (= [x y] (canvas->xy @CLICK)))
@@ -126,6 +113,3 @@
               (range (count board))))
     board))
 
-(defn game-over? [board]
-  (not (reduce #(and %1 (= "black" %2))
-         (butlast (rest (take COLS board))))))
